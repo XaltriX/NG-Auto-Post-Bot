@@ -1,3 +1,4 @@
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ConversationHandler, CallbackQueryHandler, ContextTypes
@@ -16,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # States for conversation
-THUMBNAIL, VIDEO_LINK, ADDING_CHANNEL, SCHEDULE_OR_POST_NOW, SCHEDULE_TIME, CONFIRM_ANOTHER = range(6)
+THUMBNAIL, VIDEO_LINK, BOT_SELECTION, ADDING_CHANNEL, SCHEDULE_OR_POST_NOW, SCHEDULE_TIME, CONFIRM_ANOTHER = range(7)
 
 # Store user data temporarily
 user_data = {}
@@ -24,6 +25,12 @@ user_data = {}
 # Files to store data
 CHANNELS_FILE = 'channels.json'
 SCHEDULED_POSTS_FILE = 'scheduled_posts.json'
+
+# Tutorial links for different bots
+BOT_TUTORIALS = {
+    'xrated': 'https://t.me/TutorialsNG/11',
+    'nightrider': 'https://t.me/TutorialsNG/10'
+}
 
 # Decorative lines
 DECORATIVE_LINES = [
@@ -88,52 +95,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     return ConversationHandler.END
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle button clicks"""
-    query = update.callback_query
-    await query.answer()
-    
-    if query.data == 'create_post':
-        await query.message.reply_text("🖼️ Please send me a thumbnail (image, GIF, or video).")
-        return THUMBNAIL
-    elif query.data == 'manage_channels':
-        return await manage_channels(update, context)
-    elif query.data == 'add_channel':
-        await query.message.reply_text(
-            "📢 Please forward a message from the channel or send the channel ID.\n"
-            "Make sure the bot is an admin in the channel! 🤖"
-        )
-        return ADDING_CHANNEL
-    elif query.data == 'list_channels':
-        return await list_channels(update, context)
-    elif query.data == 'check_scheduled':
-        return await check_scheduled_posts(update, context)
-    elif query.data == 'cancel':
-        return await cancel(update, context)
-    elif query.data == 'main_menu':
-        return await start(update, context)
-    
-    return ConversationHandler.END
-
-async def manage_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show channel management options"""
-    keyboard = [
-        [InlineKeyboardButton("➕ Add Channel", callback_data='add_channel')],
-        [InlineKeyboardButton("📄 List Channels", callback_data='list_channels')],
-        [InlineKeyboardButton("📝 Create New Post", callback_data='create_post')],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    message = "📺 Channel Management:\nWhat would you like to do? 🤔"
-    
-    if update.callback_query:
-        await update.callback_query.message.edit_text(message, reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(message, reply_markup=reply_markup)
-    
-    return ConversationHandler.END
-
 async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a new channel"""
     message = update.message
@@ -150,7 +111,7 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "⚠️ Please send a valid channel ID or forward a message from the channel.\n"
                     "Make sure the bot is an admin in the channel! 🤖"
                 )
-                return ConversationHandler.END
+                return ADDING_CHANNEL
 
         try:
             chat = await context.bot.get_chat(channel_id)
@@ -161,7 +122,7 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "⚠️ I don't have permission to post messages in this channel.\n"
                     "Please make sure I am an admin with posting rights! 🔑"
                 )
-                return ConversationHandler.END
+                return ADDING_CHANNEL
 
         except Exception as e:
             logger.error(f"Error verifying channel access: {str(e)}")
@@ -171,7 +132,7 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "2. I am added as an admin in the channel 👑\n"
                 "3. I have permission to post messages 📝"
             )
-            return ConversationHandler.END
+            return ADDING_CHANNEL
 
         channels = load_channels()
         if user_id not in channels:
@@ -196,7 +157,19 @@ async def add_channel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "3. The channel exists and is accessible 🔍"
         )
 
-    return await manage_channels(update, context)
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Another Channel", callback_data='add_channel')],
+        [InlineKeyboardButton("📄 List Channels", callback_data='list_channels')],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await message.reply_text(
+        "What would you like to do next? 🤔",
+        reply_markup=reply_markup
+    )
+
+    return ConversationHandler.END
 
 async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all channels for the user"""
@@ -213,14 +186,36 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for channel_id in channels[user_id]:
             try:
                 chat = await context.bot.get_chat(channel_id)
-                channel_list.append(f"📺 {chat.title}\n   Channel ID: {channel_id}")
+                bot_member = await context.bot.get_chat_member(channel_id, context.bot.id)
+                status = "✅ Active" if bot_member.can_post_messages else "⚠️ No Posting Permission"
+                channel_list.append(
+                    f"📺 {chat.title}\n"
+                    f"   Channel ID: {channel_id}\n"
+                    f"   Status: {status}"
+                )
             except Exception:
-                channel_list.append(f"❓ Unknown Channel\n   Channel ID: {channel_id}")
+                channel_list.append(
+                    f"❌ Inaccessible Channel\n"
+                    f"   Channel ID: {channel_id}\n"
+                    f"   Status: Bot might have been removed"
+                )
         
-        await message.reply_text(
-            "📄 Your channels:\n\n" + "\n\n".join(channel_list) + 
-            "\n\nTo remove a channel, start over and add only the channels you want to keep. ℹ️"
+        message_text = (
+            "📄 Your Channels:\n\n" + 
+            "\n\n".join(channel_list) + 
+            "\n\n✨ To remove a channel:\n" +
+            "1. Use /start to restart\n" +
+            "2. Choose 'Manage Channels'\n" +
+            "3. Add only the channels you want to keep"
         )
+        
+        # Split message if it's too long
+        if len(message_text) > 4096:
+            chunks = [message_text[i:i+4096] for i in range(0, len(message_text), 4096)]
+            for chunk in chunks:
+                await message.reply_text(chunk)
+        else:
+            await message.reply_text(message_text)
     else:
         await message.reply_text(
             "📭 You haven't added any channels yet!\n"
@@ -229,7 +224,6 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("➕ Add Channel", callback_data='add_channel')],
-        [InlineKeyboardButton("📄 List Channels", callback_data='list_channels')],
         [InlineKeyboardButton("📝 Create New Post", callback_data='create_post')],
         [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
     ]
@@ -240,6 +234,56 @@ async def list_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+    return ConversationHandler.END
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button clicks"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == 'create_post':
+        await query.message.reply_text("🖼️ Please send me a thumbnail (image, GIF, or video).")
+        return THUMBNAIL
+    elif query.data == 'manage_channels':
+        return await manage_channels(update, context)
+    elif query.data == 'add_channel':
+        await query.message.reply_text(
+            "📢 Please forward a message from the channel or send the channel ID.\n"
+            "Make sure the bot is an admin in the channel! 🤖"
+        )
+        return ADDING_CHANNEL
+    elif query.data == 'list_channels':
+        return await list_channels(update, context)
+    elif query.data == 'check_scheduled':
+        return await check_scheduled_posts(update, context)
+    elif query.data == 'cancel':
+        return await cancel(update, context)
+    elif query.data == 'main_menu':
+        return await start(update, context)
+    elif query.data in ['xrated', 'nightrider']:
+        user_id = query.from_user.id
+        user_data[user_id]['bot_type'] = query.data
+        return await schedule_post_prompt(update, context)
+    
+    return ConversationHandler.END
+
+async def manage_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show channel management options"""
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Channel", callback_data='add_channel')],
+        [InlineKeyboardButton("📄 List Channels", callback_data='list_channels')],
+        [InlineKeyboardButton("📝 Create New Post", callback_data='create_post')],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = "📺 Channel Management:\nWhat would you like to do? 🤔"
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(message, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(message, reply_markup=reply_markup)
+    
     return ConversationHandler.END
 
 async def thumbnail_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -269,10 +313,26 @@ async def thumbnail_received(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return VIDEO_LINK
 
 async def video_link_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ask the user whether to post immediately or schedule the post"""
+    """Ask the user to select the bot type"""
     user_id = update.message.from_user.id
     user_data[user_id]["video_link"] = escape_markdown(update.message.text)
 
+    keyboard = [
+        [InlineKeyboardButton("🔞 X-Rated Bot", callback_data='xrated')],
+        [InlineKeyboardButton("🌙 Night Rider Bot", callback_data='nightrider')],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "Please select which bot you want to use for this post: 🤖",
+        reply_markup=reply_markup
+    )
+
+    return BOT_SELECTION
+
+async def schedule_post_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ask whether to post now or schedule"""
     keyboard = [
         [InlineKeyboardButton("📤 Post Now", callback_data='post_now')],
         [InlineKeyboardButton("📅 Schedule", callback_data='schedule')],
@@ -280,7 +340,7 @@ async def video_link_received(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
+    await update.callback_query.message.edit_text(
         "Would you like to post now or schedule the post? ⏰",
         reply_markup=reply_markup
     )
@@ -298,93 +358,6 @@ async def schedule_or_post_now(update: Update, context: ContextTypes.DEFAULT_TYP
         await query.message.reply_text(
             "⏰ Please provide the time to schedule the post (HH:MM format, IST).\n"
             "Example: 14:30 for 2:30 PM"
-        )
-        return SCHEDULE_TIME
-
-async def schedule_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Schedule the post at the specified time"""
-    user_id = str(update.message.from_user.id)
-    user_time = update.message.text
-
-    try:
-        # Parse the provided time in IST
-        schedule_time = datetime.strptime(user_time, "%H:%M").time()
-        now = datetime.now()
-        schedule_datetime = datetime.combine(now, schedule_time)
-
-        # If the scheduled time is in the past, schedule it for the next day
-        if schedule_datetime < now:
-            schedule_datetime += timedelta(days=1)
-
-        # Load existing scheduled posts
-        scheduled_posts = load_scheduled_posts()
-        if user_id not in scheduled_posts:
-            scheduled_posts[user_id] = []
-
-        # Store channel information with the scheduled post
-        channels = load_channels()
-        user_channels = channels.get(user_id, [])
-
-        # Create post data
-        post_data = {
-            "time": schedule_datetime.strftime("%Y-%m-%d %H:%M:%S"),
-            "thumbnail_id": user_data[int(user_id)]["thumbnail_id"],
-            "thumbnail_type": user_data[int(user_id)]["thumbnail_type"],
-            "video_link": user_data[int(user_id)]["video_link"],
-            "status": "⏳ Pending",
-            "channels": user_channels,
-            "user_id": user_id
-        }
-
-        # Add new post to scheduled posts
-        scheduled_posts[user_id].append(post_data)
-        save_scheduled_posts(scheduled_posts)
-
-        # Schedule the job with the complete post data
-        scheduler.add_job(
-            post_scheduled,
-            'date',
-            run_date=schedule_datetime,
-            args=[context, post_data]
-        )
-
-        # Show success message
-        status_message = (
-            f"✅ Post successfully scheduled!\n\n"
-            f"📅 Scheduled for: {schedule_datetime.strftime('%Y-%m-%d')}\n"
-            f"⏰ Time: {schedule_datetime.strftime('%H:%M')} IST\n\n"
-            f"Current scheduled posts:\n"
-        )
-
-        # Add list of all scheduled posts
-        for idx, post in enumerate(scheduled_posts[user_id], 1):
-            post_time = datetime.strptime(post['time'], "%Y-%m-%d %H:%M:%S")
-            status_message += (
-                f"\n{idx}. {post['status']}\n"
-                f"   📅 {post_time.strftime('%Y-%m-%d %H:%M')} IST"
-            )
-
-        await update.message.reply_text(status_message)
-
-        # Ask if user wants to schedule another post
-        keyboard = [
-            [InlineKeyboardButton("📝 Schedule Another Post", callback_data='create_post')],
-            [InlineKeyboardButton("📊 View All Scheduled Posts", callback_data='check_scheduled')],
-            [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await update.message.reply_text(
-            "Would you like to schedule another post? 🤔",
-            reply_markup=reply_markup
-        )
-
-        return CONFIRM_ANOTHER
-
-    except ValueError:
-        await update.message.reply_text(
-            "⚠️ Invalid time format!\n"
-            "Please provide the time in HH:MM format (e.g., 14:30) 🕐"
         )
         return SCHEDULE_TIME
 
@@ -406,6 +379,9 @@ async def post_to_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
     success_channels = []
     failed_channels = []
     
+    # Get tutorial link based on bot type
+    tutorial_link = BOT_TUTORIALS[user_data[int(user_id)]['bot_type']]
+    
     # Create the post text
     post_text = (
         f"{DECORATIVE_LINES[0]}\n\n"
@@ -413,7 +389,7 @@ async def post_to_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"_{user_data[int(user_id)]['video_link']}_\n\n"
         f"{DECORATIVE_LINES[2]}\n\n"
         f"*📥 HOW TO DOWNLOAD AND WATCH VIDEO:*\n"
-        f"_{escape_markdown('https://t.me/TutorialsNG/11')}_\n\n"
+        f"_{escape_markdown(tutorial_link)}_\n\n"
         f"{DECORATIVE_LINES[3]}\n\n"
         f"*Made by \\- @Neonghost\\_Network* 🌟"
     )
@@ -475,20 +451,162 @@ async def post_to_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_data.pop(int(user_id))
     
     return ConversationHandler.END
+
+async def check_scheduled_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Check the status of scheduled posts"""
+    user_id = str(update.callback_query.from_user.id if update.callback_query else update.message.from_user.id)
+    scheduled_posts = load_scheduled_posts().get(user_id, [])
+    
+    if not scheduled_posts:
+        message = (
+            "📊 Scheduled Posts Status\n\n"
+            "🚫 No posts scheduled at the moment!\n\n"
+            "Would you like to schedule a post? 😊"
+        )
+    else:
+        message = "📊 Scheduled Posts Status\n\n"
+        now = datetime.now()
+        
+        # Filter and sort posts
+        posted_posts = [
+            post for post in scheduled_posts 
+            if datetime.strptime(post['time'], "%Y-%m-%d %H:%M:%S") < now and 
+            post.get('status', '').startswith('✅')
+        ]
+        pending_posts = [
+            post for post in scheduled_posts 
+            if datetime.strptime(post['time'], "%Y-%m-%d %H:%M:%S") >= now
+        ]
+        
+        # Show last 5 successful posts
+        if posted_posts:
+            message += "Recently Posted:\n"
+            for post in sorted(posted_posts, key=lambda x: x['time'], reverse=True)[:5]:
+                post_time = datetime.strptime(post['time'], "%Y-%m-%d %H:%M:%S")
+                message += (
+                    f"• {post['status']}\n"
+                    f"  📅 {post_time.strftime('%Y-%m-%d %H:%M')} IST\n"
+                )
+            message += f"{'➖' * 15}\n"
+        
+        # Show all pending posts
+        if pending_posts:
+            message += "\nPending Posts:\n"
+            for post in sorted(pending_posts, key=lambda x: x['time']):
+                post_time = datetime.strptime(post['time'], "%Y-%m-%d %H:%M:%S")
+                message += (
+                    f"• ⏳ Scheduled\n"
+                    f"  📅 {post_time.strftime('%Y-%m-%d %H:%M')} IST\n"
+                )
+
+    keyboard = [
+        [InlineKeyboardButton("📝 Schedule New Post", callback_data='create_post')],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if update.callback_query:
+        await update.callback_query.message.edit_text(message, reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(message, reply_markup=reply_markup)
+
+    return ConversationHandler.END
+
+async def schedule_time_received(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Schedule the post at the specified time"""
+    user_id = str(update.message.from_user.id)
+    user_time = update.message.text
+
+    try:
+        # Parse the provided time in IST
+        schedule_time = datetime.strptime(user_time, "%H:%M").time()
+        now = datetime.now()
+        schedule_datetime = datetime.combine(now, schedule_time)
+
+        # If the scheduled time is in the past, schedule it for the next day
+        if schedule_datetime < now:
+            schedule_datetime += timedelta(days=1)
+
+        # Load existing scheduled posts
+        scheduled_posts = load_scheduled_posts()
+        if user_id not in scheduled_posts:
+            scheduled_posts[user_id] = []
+
+        # Store channel information with the scheduled post
+        channels = load_channels()
+        user_channels = channels.get(user_id, [])
+
+        # Get tutorial link based on bot type
+        tutorial_link = BOT_TUTORIALS[user_data[int(user_id)]['bot_type']]
+
+        # Create post data
+        post_data = {
+            "time": schedule_datetime.strftime("%Y-%m-%d %H:%M:%S"),
+            "thumbnail_id": user_data[int(user_id)]["thumbnail_id"],
+            "thumbnail_type": user_data[int(user_id)]["thumbnail_type"],
+            "video_link": user_data[int(user_id)]["video_link"],
+            "bot_type": user_data[int(user_id)]["bot_type"],
+            "tutorial_link": tutorial_link,
+            "status": "⏳ Pending",
+            "channels": user_channels,
+            "user_id": user_id
+        }
+
+        # Add new post to scheduled posts
+        scheduled_posts[user_id].append(post_data)
+        save_scheduled_posts(scheduled_posts)
+
+        # Schedule the job
+        scheduler.add_job(
+            post_scheduled,
+            'date',
+            run_date=schedule_datetime,
+            args=[context, post_data]
+        )
+
+        # Show success message
+        await update.message.reply_text(
+            f"✅ Post successfully scheduled!\n\n"
+            f"📅 Scheduled for: {schedule_datetime.strftime('%Y-%m-%d')}\n"
+            f"⏰ Time: {schedule_datetime.strftime('%H:%M')} IST"
+        )
+
+        # Ask if user wants to schedule another post
+        keyboard = [
+            [InlineKeyboardButton("📝 Schedule Another Post", callback_data='create_post')],
+            [InlineKeyboardButton("📊 View All Scheduled Posts", callback_data='check_scheduled')],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(
+            "Would you like to schedule another post? 🤔",
+            reply_markup=reply_markup
+        )
+
+        return CONFIRM_ANOTHER
+
+    except ValueError:
+        await update.message.reply_text(
+            "⚠️ Invalid time format!\n"
+            "Please provide the time in HH:MM format (e.g., 14:30) 🕐"
+        )
+        return SCHEDULE_TIME
+
 async def post_scheduled(context: ContextTypes.DEFAULT_TYPE, post_data: dict):
     """Handle scheduled post execution"""
     try:
         success_channels = []
         failed_channels = []
         
-        # Create the post text
+        # Create the post text using the stored tutorial link
         post_text = (
             f"{DECORATIVE_LINES[0]}\n\n"
             f"*🎬 VIDEO LINK:*\n"
             f"_{post_data['video_link']}_\n\n"
             f"{DECORATIVE_LINES[2]}\n\n"
             f"*📥 HOW TO DOWNLOAD AND WATCH VIDEO:*\n"
-            f"_{escape_markdown('https://t.me/TutorialsNG/11')}_\n\n"
+            f"_{escape_markdown(post_data['tutorial_link'])}_\n\n"
             f"{DECORATIVE_LINES[3]}\n\n"
             f"*Made by \\- @Neonghost\\_Network* 🌟"
         )
@@ -557,44 +675,6 @@ async def post_scheduled(context: ContextTypes.DEFAULT_TYPE, post_data: dict):
     except Exception as e:
         logger.error(f"Error in post_scheduled: {str(e)}")
 
-async def check_scheduled_posts(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check the status of scheduled posts"""
-    user_id = str(update.callback_query.from_user.id if update.callback_query else update.message.from_user.id)
-    scheduled_posts = load_scheduled_posts().get(user_id, [])
-    
-    if not scheduled_posts:
-        message = (
-            "📊 Scheduled Posts Status\n\n"
-            "🚫 No posts scheduled at the moment!\n\n"
-            "Would you like to schedule a post? 😊"
-        )
-    else:
-        message = "📊 Scheduled Posts Status\n\n"
-        now = datetime.now()
-        
-        for idx, post in enumerate(scheduled_posts, 1):
-            post_time = datetime.strptime(post['time'], "%Y-%m-%d %H:%M:%S")
-            status = "✅ Posted" if post_time < now else "⏳ Pending"
-            message += (
-                f"{idx}. Status: {post['status'] if 'status' in post else status}\n"
-                f"   📅 Date: {post_time.strftime('%Y-%m-%d')}\n"
-                f"   ⏰ Time: {post_time.strftime('%H:%M')} IST\n"
-                f"   {'➖' * 15}\n"
-            )
-
-    keyboard = [
-        [InlineKeyboardButton("📝 Schedule New Post", callback_data='create_post')],
-        [InlineKeyboardButton("🏠 Main Menu", callback_data='main_menu')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.callback_query:
-        await update.callback_query.message.edit_text(message, reply_markup=reply_markup)
-    else:
-        await update.message.reply_text(message, reply_markup=reply_markup)
-
-    return ConversationHandler.END
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel the conversation"""
     user_id = update.effective_user.id
@@ -606,12 +686,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Operation cancelled. Send /start to begin again.")
     
     if user_id in user_data:
-        if "thumbnail_id" in user_data[user_id]:
-            del user_data[user_id]["thumbnail_id"]
-        if "thumbnail_type" in user_data[user_id]:
-            del user_data[user_id]["thumbnail_type"]
-        if "video_link" in user_data[user_id]:
-            del user_data[user_id]["video_link"]
+        user_data.pop(user_id)
     
     return ConversationHandler.END
 
@@ -636,6 +711,10 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, video_link_received),
                 CommandHandler('cancel', cancel),
                 CallbackQueryHandler(button_handler)
+            ],
+            BOT_SELECTION: [
+                CallbackQueryHandler(button_handler),
+                CommandHandler('cancel', cancel)
             ],
             SCHEDULE_OR_POST_NOW: [
                 CallbackQueryHandler(schedule_or_post_now)
