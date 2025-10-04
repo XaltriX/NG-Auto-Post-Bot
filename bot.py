@@ -27,7 +27,7 @@ SCHEDULED_POSTS_FILE = 'scheduled_posts.json'
 MAX_POSTED_HISTORY = 5  # Show only last 5 posted items
 
 BOT_TUTORIALS = {
-    'xrated': 'https://t.me/TutorialsNG/11',
+    'xrated': 'https://t.me/TutorialsNG/13',
     'nightrider': 'https://t.me/TutorialsNG/10'
 }
 
